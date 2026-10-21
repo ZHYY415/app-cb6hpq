@@ -832,18 +832,7 @@ function sendEventShare(evId, fid) {
     text: "推荐你看看这个：" + ev.short + "（" + ev.level + " · " + st.text + "）"
   });
   save();
-  document.getElementById("overlay-root").innerHTML =
-    '<div class="overlay">' +
-    '<header id="topbar"><div class="tb-left"><button class="tb-back" onclick="closeOverlay()">‹ 返回</button></div>' +
-    '<div class="tb-title">' + esc(f.name) + "</div>" +
-    '<div class="tb-right"><span style="font-size:11px;opacity:.85">' + esc(f.school) + "</span></div></header>" +
-    '<div class="chat-body" id="chat-body"></div>' +
-    '<div class="chat-input-row">' +
-    '<button class="chat-img-btn" title="语音通话" onclick="startVoiceCall()">📞</button>' +
-    '<button class="chat-img-btn" title="发送语音" onclick="sendChatVoice()">🎤</button>' +
-    '<button class="chat-img-btn" title="发送图片" onclick="sendChatImg()">📷</button>' +
-    '<input id="chat-input" placeholder="输入消息…" onkeydown="if(event.key===\'Enter\')sendChat()">' +
-    '<button onclick="sendChat()">' + I.send + "</button></div></div>";
+  document.getElementById("overlay-root").innerHTML = chatOverlayHTML(esc(f.name), esc(f.school), "chat-body", "chat");
   renderChat();
   toast("已发送给 " + f.name);
   setTimeout(() => {
@@ -2264,6 +2253,193 @@ function addFriend() {
     toast("已向「" + kw + "」发送好友申请（演示）");
   }
 }
+/* ================= 微信式聊天输入栏（私信/群聊共用） ================= */
+let chatVoiceMode = false;
+let wxPanel = ""; /* "" | "emoji" | "plus" */
+const WX_EMOJIS = ["😀", "😄", "😂", "🥹", "😍", "😘", "😎", "🤔", "😅", "😆", "😉", "🙃", "🥳", "😴", "😭", "🤝", "👍", "👏", "🙏", "💪", "🔥", "✅", "⚡", "🎉", "❤️", "🌹", "💯", "🏆", "📌", "🎯", "🚀", "☕"];
+/* 拍摄演示图库（内置现场图随机一张） */
+const DEMO_SHOTS = ["img/scene-answer.jpg", "img/scene-expo.jpg", "img/scene-lab.jpg", "img/scene-robo.jpg", "img/works-cert.jpg", "img/works-model.jpg", "img/works-team.jpg"];
+/* 聊天页骨架：顶栏 + 消息区 + 微信式输入栏（私信/群聊共用） */
+function chatOverlayHTML(title, right, bodyId, scene) {
+  return '<div class="overlay">' +
+    '<header id="topbar"><div class="tb-left"><button class="tb-back" onclick="closeOverlay()">‹ 返回</button></div>' +
+    '<div class="tb-title">' + title + '</div>' +
+    '<div class="tb-right"><span style="font-size:11px;opacity:.85">' + right + "</span></div></header>" +
+    '<div class="chat-body" id="' + bodyId + '"></div>' +
+    wxBarHTML(scene) + "</div>";
+}
+function wxBarHTML(scene) {
+  const isChat = scene === "chat";
+  const plusItems = isChat
+    ? [["album", "📷", "相册"], ["shoot", "🎬", "拍摄"], ["vcall", "📹", "视频通话"], ["call", "📞", "语音通话"],
+       ["share", "🏆", "分享赛事"], ["invite", "👥", "邀请好友"], ["loc", "📍", "位置"], ["redp", "🧧", "红包"]]
+    : [["album", "📷", "相册"], ["shoot", "🎬", "拍摄"], ["share", "🏆", "分享赛事"], ["notice", "📢", "群公告"],
+       ["invite", "👥", "邀请好友"], ["loc", "📍", "位置"], ["redp", "🧧", "红包"], ["vinput", "🎤", "语音输入"]];
+  const inpId = isChat ? "chat-input" : "group-input";
+  const sendFn = isChat ? "sendChat()" : "sendGroup()";
+  return '<div class="wx-bar' + (chatVoiceMode ? " voice-mode" : "") + '" id="wx-bar">' +
+    '<button class="wx-ic" onclick="toggleVoiceMode()">' + (chatVoiceMode ? "⌨️" : "🎤") + "</button>" +
+    '<div class="wx-input-wrap">' +
+      '<input id="' + inpId + '" placeholder="说点什么…" oninput="wxSyncSend(this)" onkeydown="if(event.key===\'Enter\')' + sendFn + '">' +
+      '<button class="wx-send" id="wx-send" onclick="' + sendFn + '">发送</button>' +
+      '<button class="wx-hold" onmousedown="chatHoldStart()" ontouchstart="chatHoldStart()" onmouseup="chatHoldEnd()" ontouchend="chatHoldEnd()">按住 说话</button>' +
+    "</div>" +
+    '<button class="wx-ic" onclick="toggleEmojiPanel()">😊</button>' +
+    '<button class="wx-ic" onclick="togglePlusPanel()">➕</button>' +
+    '<div class="wx-panel" id="wx-emoji"><div class="wx-panel-tip">常用表情 · 点击插入</div>' +
+      '<div class="wx-emoji-grid">' + WX_EMOJIS.map(e => '<button data-e="' + e + '" onclick="insertEmoji(this)">' + e + "</button>").join("") + "</div></div>" +
+    '<div class="wx-panel" id="wx-plus"><div class="wx-plus-grid">' +
+      plusItems.map(p => '<div class="wx-plus-item" onclick="chatPanelAction(\'' + p[0] + '\')"><i>' + p[1] + "</i><span>" + p[2] + "</span></div>").join("") +
+      "</div></div></div>";
+}
+/* 语音模式切换（左键 🎤 ↔ ⌨️，输入框变「按住说话」） */
+function toggleVoiceMode() {
+  chatVoiceMode = !chatVoiceMode; closeWxPanels();
+  const bar = document.getElementById("wx-bar");
+  if (!bar) return;
+  bar.classList.toggle("voice-mode", chatVoiceMode);
+  const ic = bar.querySelector(".wx-ic");
+  if (ic) ic.innerHTML = chatVoiceMode ? "⌨️" : "🎤";
+}
+function chatHoldStart() {
+  const h = document.querySelector("#wx-bar .wx-hold");
+  if (h) { h.classList.add("on"); h.textContent = "松开 发送"; }
+}
+function chatHoldEnd() {
+  const h = document.querySelector("#wx-bar .wx-hold");
+  if (h && h.classList.contains("on")) {
+    h.classList.remove("on"); h.textContent = "按住 说话";
+    if (currentCtx.page === "group") sendGroupVoice(); else sendChatVoice();
+  }
+}
+/* 表情 / 加号面板开合 */
+function setWxPanel(p) {
+  wxPanel = wxPanel === p ? "" : p;
+  const e = document.getElementById("wx-emoji"), pl = document.getElementById("wx-plus"), bar = document.getElementById("wx-bar");
+  if (e) e.classList.toggle("show", wxPanel === "emoji");
+  if (pl) pl.classList.toggle("show", wxPanel === "plus");
+  if (bar) bar.classList.toggle("panel-open", !!wxPanel);
+}
+function toggleEmojiPanel() { setWxPanel("emoji"); }
+function togglePlusPanel() { setWxPanel("plus"); }
+function closeWxPanels() {
+  if (!wxPanel) return;
+  wxPanel = "";
+  const e = document.getElementById("wx-emoji"), pl = document.getElementById("wx-plus"), bar = document.getElementById("wx-bar");
+  if (e) e.classList.remove("show");
+  if (pl) pl.classList.remove("show");
+  if (bar) bar.classList.remove("panel-open");
+}
+function insertEmoji(btn) {
+  const inp = document.getElementById(currentCtx.page === "group" ? "group-input" : "chat-input");
+  if (!inp) return;
+  inp.value += btn.dataset.e; wxSyncSend(inp); inp.focus();
+}
+function wxSyncSend(inp) {
+  const b = document.getElementById("wx-send");
+  if (b) b.classList.toggle("show", inp.value.trim().length > 0);
+}
+/* 加号九宫格动作（私信/群聊自动分发） */
+function chatPanelAction(key) {
+  const isGroup = currentCtx.page === "group";
+  if (key === "album") { if (isGroup) sendGroupImg(false); else sendChatImg(false); }
+  else if (key === "shoot") { if (isGroup) sendGroupImg(true); else sendChatImg(true); }
+  else if (key === "call") { startVoiceCall("voice"); }
+  else if (key === "vcall") { startVoiceCall("video"); }
+  else if (key === "share") { chatShareEvent(); }
+  else if (key === "vinput") { closeWxPanels(); if (!chatVoiceMode) toggleVoiceMode(); }
+  else if (key === "notice") { closeWxPanels(); toast("群公告功能演示：训练安排以老师通知为准"); }
+  else if (key === "invite") { closeWxPanels(); toast("邀请链接已复制，发给同学就能进群（演示）"); }
+  else if (key === "loc") { closeWxPanels(); toast("演示环境暂不支持发送位置"); }
+  else if (key === "redp") { closeWxPanels(); toast("先专心冲比赛，红包赛后再发 😄"); }
+}
+/* 聊天内分享赛事：选择赛事 → 发送卡片（私信发给对方 / 群聊发到本群） */
+function chatShareEvent() {
+  const list = DB.events.map(ev => ({ ev: ev, st: evStatus(ev) }))
+    .sort((a, b) => (a.st.code === "sign" ? 0 : 1) - (b.st.code === "sign" ? 0 : 1)).slice(0, 14);
+  modal('<h3>🏆 分享赛事</h3>' +
+    '<div style="font-size:11px;color:var(--t3);margin-bottom:10px">正在报名的赛事排在前面，点击即发送</div>' +
+    '<div style="max-height:320px;overflow-y:auto;margin:0 -4px">' +
+    list.map(it => '<div class="se-item" onclick="pickShareEvent(\'' + it.ev.id + '\')">' +
+      '<div style="font-size:12.5px;font-weight:700;line-height:1.5">' + esc(it.ev.short || it.ev.name) + "</div>" +
+      '<div style="font-size:10.5px;color:var(--t3);margin-top:3px">' + it.ev.level + " · " + it.st.text + "</div></div>").join("") +
+    "</div>");
+}
+function pickShareEvent(evId) {
+  closeModal();
+  const ev = DB.events.find(e => e.id === evId);
+  if (!ev) return;
+  const st = evStatus(ev);
+  const msg = { from: "me", type: "event", evId: evId, time: nowTime(), text: (currentCtx.page === "group" ? "分享到本群：" : "分享给你：") + ev.short + "（" + ev.level + " · " + st.text + "）" };
+  if (currentCtx.page === "group") {
+    const g = allGroups().find(x => x.id === currentCtx.groupId);
+    if (!g) return;
+    g.msgs.push(msg);
+    if (state.myGroups.some(x => x.id === g.id)) save();
+    renderGroupBody();
+    setTimeout(() => {
+      g.msgs.push({ from: ["小熊猫", "Celine", "老K", "码上跑"][Math.floor(Math.random() * 4)], text: "这个比赛不错，一起报？", time: nowTime() });
+      renderGroupBody();
+    }, 1100);
+  } else {
+    const pid = currentCtx.peerId;
+    state.chats[pid].push(msg);
+    save(); renderChat();
+    setTimeout(() => {
+      state.chats[pid].push({ from: "other", text: "看了，正好我也想参加！", time: nowTime() });
+      save(); renderChat();
+    }, 1100);
+  }
+  closeWxPanels();
+}
+/* 统一消息气泡渲染（文本/图片/语音/通话记录/赛事卡片） */
+function bubbleHTML(m) {
+  if (m.type === "img")
+    return '<div class="bubble" style="padding:4px"><img src="' + m.data + '" style="max-width:190px;max-height:220px;border-radius:10px;display:block;cursor:zoom-in" onclick="openViewer([\'' + m.data + '\'],0,\'图片消息\')" alt="图片"></div>';
+  if (m.type === "event")
+    return '<div class="bubble share-bubble" onclick="closeOverlay();openDetail(\'' + m.evId + '\')"><div class="sb-tag">🏆 赛事分享</div>' +
+      '<div class="sb-name">' + esc((DB.events.find(e => e.id === m.evId) || {}).short || "赛事") + "</div>" +
+      '<div class="sb-meta">' + esc(m.text) + "</div>" +
+      '<div class="sb-btn">查看详情 →</div></div>';
+  if (m.type === "voice")
+    return '<div class="bubble voice-bubble" onclick="playVoice(this)"><span class="voice-wave">' +
+      '<i style="animation-delay:0s"></i><i style="animation-delay:.12s"></i><i style="animation-delay:.24s"></i><i style="animation-delay:.36s"></i>' +
+      '</span><span class="voice-dur">' + (m.dur || 3) + '"</span></div>';
+  if (m.type === "call")
+    return '<div class="bubble call-bubble" onclick="callRecordPopup()"><span class="call-ico">' + (/^视频/.test(m.text) ? "📹" : "📞") + '</span><span class="call-txt">' + esc(m.text) + "</span><span class='call-time'>" + esc(m.time) + "</span></div>";
+  return '<div class="bubble">' + esc(m.text) + "</div>";
+}
+/* 群聊：语音消息 */
+function sendGroupVoice() {
+  const g = allGroups().find(x => x.id === currentCtx.groupId);
+  if (!g) return;
+  const dur = 3 + Math.floor(Math.random() * 9);
+  g.msgs.push({ from: "me", type: "voice", text: "语音消息", dur: dur, time: nowTime() });
+  if (state.myGroups.some(x => x.id === g.id)) save();
+  renderGroupBody();
+  setTimeout(() => {
+    g.msgs.push({ from: ["小熊猫", "Celine", "老K", "码上跑"][Math.floor(Math.random() * 4)], text: "收到你的语音啦，正解！", time: nowTime() });
+    renderGroupBody();
+  }, 1100);
+}
+/* 群聊：发图片（相册选图 / 模拟拍摄） */
+function sendGroupImg(shoot) {
+  const g = allGroups().find(x => x.id === currentCtx.groupId);
+  if (!g) return;
+  closeWxPanels();
+  const send = data => {
+    g.msgs.push({ from: "me", type: "img", data: data, time: nowTime() });
+    if (state.myGroups.some(x => x.id === g.id)) save();
+    renderGroupBody();
+    setTimeout(() => {
+      g.msgs.push({ from: ["小熊猫", "Celine", "老K", "码上跑"][Math.floor(Math.random() * 4)], text: "图片收到，收藏了！", time: nowTime() });
+      renderGroupBody();
+    }, 1200);
+  };
+  if (shoot) { send(DEMO_SHOTS[Math.floor(Math.random() * DEMO_SHOTS.length)]); toast("已发送刚拍摄的照片（演示）"); }
+  else pickImage(520, send);
+}
+
 function openChatList() {
   currentCtx = { page: "chats" };
   const chats = Object.keys(state.chats);
@@ -2281,18 +2457,8 @@ function openChat(pid) {
   if (!f) { toast("该用户暂不支持私信（演示）"); return; }
   currentCtx = { page: "chat", peerId: pid };
   if (!state.chats[pid]) state.chats[pid] = [];
-  document.getElementById("overlay-root").innerHTML =
-    '<div class="overlay">' +
-    '<header id="topbar"><div class="tb-left"><button class="tb-back" onclick="closeOverlay()">‹ 返回</button></div>' +
-    '<div class="tb-title">' + esc(f.name) + "</div>" +
-    '<div class="tb-right"><span style="font-size:11px;opacity:.85">' + esc(f.school) + "</span></div></header>" +
-    '<div class="chat-body" id="chat-body"></div>' +
-    '<div class="chat-input-row">' +
-    '<button class="chat-img-btn" title="语音通话" onclick="startVoiceCall()">📞</button>' +
-    '<button class="chat-img-btn" title="发送语音" onclick="sendChatVoice()">🎤</button>' +
-    '<button class="chat-img-btn" title="发送图片" onclick="sendChatImg()">📷</button>' +
-    '<input id="chat-input" placeholder="输入消息…" onkeydown="if(event.key===\'Enter\')sendChat()">' +
-    '<button onclick="sendChat()">' + I.send + "</button></div></div>";
+  chatVoiceMode = false; wxPanel = "";
+  document.getElementById("overlay-root").innerHTML = chatOverlayHTML(esc(f.name), esc(f.school), "chat-body", "chat");
   renderChat();
 }
 function renderChat() {
@@ -2305,20 +2471,7 @@ function renderChat() {
       ? state.chats[pid].map(m =>
         '<div class="bubble-row ' + (m.from === "me" ? "me" : "") + '">' +
         (m.from === "me" ? "" : avatarHtml(f, 32)) +
-        (m.type === "img"
-          ? '<div class="bubble" style="padding:4px"><img src="' + m.data + '" style="max-width:190px;max-height:220px;border-radius:10px;display:block;cursor:zoom-in" onclick="openViewer([\'' + m.data + '\'],0,\'图片消息\')" alt="图片"></div>'
-          : m.type === "event"
-            ? '<div class="bubble share-bubble" onclick="closeOverlay();openDetail(\'' + m.evId + '\')"><div class="sb-tag">🏆 赛事分享</div>' +
-              '<div class="sb-name">' + esc((DB.events.find(e => e.id === m.evId) || {}).short || "赛事") + "</div>" +
-              '<div class="sb-meta">' + esc(m.text) + "</div>" +
-              '<div class="sb-btn">查看详情 →</div></div>'
-            : m.type === "voice"
-              ? '<div class="bubble voice-bubble" onclick="playVoice(this)"><span class="voice-wave">' +
-                '<i style="animation-delay:0s"></i><i style="animation-delay:.12s"></i><i style="animation-delay:.24s"></i><i style="animation-delay:.36s"></i>' +
-                '</span><span class="voice-dur">' + (m.dur || 3) + '″</span></div>'
-              : m.type === "call"
-                ? '<div class="bubble call-bubble" onclick="callRecordPopup()"><span class="call-ico">📞</span><span class="call-txt">' + esc(m.text) + "</span><span class='call-time'>" + esc(m.time) + "</span></div>"
-                : '<div class="bubble">' + esc(m.text) + "</div>") +
+        bubbleHTML(m) +
         "</div>"
       ).join("")
       : '<div style="text-align:center;font-size:12px;color:var(--t3);padding:20px 0">打个招呼，聊聊组队的事吧～</div>');
@@ -2344,13 +2497,16 @@ function playVoice(el) {
   el.classList.add("playing");
   setTimeout(() => el.classList.remove("playing"), 2600);
 }
-/* 发起语音通话（演示：接通模拟 + 通话记录） */
-function startVoiceCall() {
+/* 发起语音/视频通话（演示：接通模拟 + 通话记录） */
+function startVoiceCall(kind) {
+  const isVideo = kind === "video";
+  window._callKind = isVideo ? "video" : "voice";
   const pid = currentCtx.peerId;
   const f = DB.users.find(x => x.id === pid);
   if (!f) { toast("无法发起通话（演示）"); return; }
-  modal('<h3 style="text-align:center">📞 语音通话</h3>' +
+  modal('<h3 style="text-align:center">' + (isVideo ? "📹 视频通话" : "📞 语音通话") + "</h3>" +
     '<div style="text-align:center;padding:6px 0 2px">' + avatarHtml(f, 56) + "</div>" +
+    (isVideo ? '<div style="text-align:center;font-size:11px;color:var(--t3);margin-top:6px">📷 摄像头已开启（演示）</div>' : "") +
     '<div style="text-align:center;font-size:16px;font-weight:800;margin-top:8px">' + esc(f.name) + "</div>" +
     '<div style="text-align:center;font-size:12px;color:var(--t3);margin-top:4px" id="call-state">正在呼叫…</div>' +
     '<div style="text-align:center;font-size:22px;font-weight:700;color:var(--c-primary);margin-top:12px" id="call-timer">00:00</div>' +
@@ -2381,7 +2537,7 @@ function hangupCall() {
   const ss = String(sec % 60).padStart(2, "0");
   closeModal();
   if (pid) {
-    state.chats[pid].push({ from: "me", type: "call", text: "语音通话 " + mm + ":" + ss, time: nowTime() });
+    state.chats[pid].push({ from: "me", type: "call", text: (window._callKind === "video" ? "视频通话 " : "语音通话 ") + mm + ":" + ss, time: nowTime() });
     save();
     if (currentCtx.page === "chat" && currentCtx.peerId === pid) renderChat();
   }
@@ -2399,22 +2555,25 @@ function sendChat() {
   if (!v) return;
   const pid = currentCtx.peerId;
   state.chats[pid].push({ from: "me", text: v, time: nowTime() });
-  inp.value = ""; save(); renderChat();
+  inp.value = ""; wxSyncSend(inp); closeWxPanels(); save(); renderChat();
   setTimeout(() => {
     state.chats[pid].push({ from: "other", text: DB.chatReplies[Math.floor(Math.random() * DB.chatReplies.length)], time: nowTime() });
     save(); renderChat();
   }, 1100);
 }
-function sendChatImg() {
-  pickImage(520, data => {
+function sendChatImg(shoot) {
+  closeWxPanels();
+  const send = data => {
     const pid = currentCtx.peerId;
     state.chats[pid].push({ from: "me", type: "img", data: data, time: nowTime() });
     save(); renderChat();
     setTimeout(() => {
-      state.chats[pid].push({ from: "other", text: "收到图片，我看看～（演示回复）", time: nowTime() });
+      state.chats[pid].push({ from: "other", text: shoot ? "这张现场照片拍得不错！" : "收到图片，我看看～（演示回复）", time: nowTime() });
       save(); renderChat();
     }, 1200);
-  });
+  };
+  if (shoot) { send(DEMO_SHOTS[Math.floor(Math.random() * DEMO_SHOTS.length)]); toast("已发送刚拍摄的照片（演示）"); }
+  else pickImage(520, send);
 }
 
 /* 群聊 */
@@ -2437,13 +2596,8 @@ function openGroup(gid) {
   const g = allGroups().find(x => x.id === gid);
   if (!g) return;
   currentCtx = { page: "group", groupId: gid };
-  document.getElementById("overlay-root").innerHTML =
-    '<div class="overlay">' +
-    '<header id="topbar"><div class="tb-left"><button class="tb-back" onclick="closeOverlay()">‹ 返回</button></div>' +
-    '<div class="tb-title">' + esc(g.name) + '</div><div class="tb-right"><span style="font-size:11px;opacity:.85">' + g.members + ' 人</span></div></header>' +
-    '<div class="chat-body" id="group-body"></div>' +
-    '<div class="chat-input-row"><input id="group-input" placeholder="在群聊中发言…" onkeydown="if(event.key===\'Enter\')sendGroup()">' +
-    '<button onclick="sendGroup()">' + I.send + "</button></div></div>";
+  chatVoiceMode = false; wxPanel = "";
+  document.getElementById("overlay-root").innerHTML = chatOverlayHTML(esc(g.name), g.members + " 人", "group-body", "group");
   renderGroupBody();
 }
 function renderGroupBody() {
@@ -2458,7 +2612,7 @@ function renderGroupBody() {
       return '<div class="bubble-row ' + (isMe ? "me" : "") + '">' +
         (isMe ? "" : '<div class="avatar avatar-click" style="width:32px;height:32px;font-size:13px;background:' + c + '" onclick="memberProfile(\'' + esc(m.from || "") + '\')">' + esc((m.from || "友")[0]) + "</div>") +
         (isMe ? "" : '<div style="font-size:10.5px;color:var(--t3);margin-bottom:3px">' + esc(m.from) + "</div>") +
-        '<div class="bubble">' + esc(m.text) + "</div></div>";
+        bubbleHTML(m) + "</div>";
     }).join("");
   box.scrollTop = box.scrollHeight;
 }
@@ -2468,7 +2622,7 @@ function sendGroup() {
   const v = inp.value.trim();
   if (!v || !g) return;
   g.msgs.push({ from: "me", text: v, time: nowTime() });
-  inp.value = "";
+  inp.value = ""; wxSyncSend(inp); closeWxPanels();
   if (state.myGroups.some(x => x.id === g.id)) save();
   renderGroupBody();
   setTimeout(() => {
