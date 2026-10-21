@@ -561,11 +561,57 @@ ul, ol { list-style: none; }
   background: #fff; border-radius: 4px 14px 14px 14px; box-shadow: var(--shadow); color: var(--t1);
 }
 .bubble-row.me .bubble { background: var(--c-gradient); color: #fff; border-radius: 14px 4px 14px 14px; }
-.chat-input-row {
-  flex: none; display: flex; gap: 8px; padding: 10px 12px; background: #fff; border-top: 1px solid var(--line);
+/* 微信式聊天输入栏（私信/群聊共用） */
+.wx-bar {
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 10px calc(9px + env(safe-area-inset-bottom, 0px));
+  background: #F6F7F9; border-top: 1px solid #E9EBEF;
 }
-.chat-input-row input { flex: 1; border: 1.5px solid var(--line); border-radius: 20px; padding: 9px 14px; background: #FAFBFD; }
-.chat-input-row button { flex: none; width: 42px; height: 42px; border-radius: 50%; background: var(--c-gradient); color: #fff; display: flex; align-items: center; justify-content: center; }
+.wx-ic {
+  flex: none; width: 36px; height: 36px; border: none; border-radius: 50%;
+  background: #EFF1F4; font-size: 17px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.wx-ic:active { background: #E3E7EC; }
+.wx-input-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; height: 38px; }
+.wx-input-wrap input {
+  width: 100%; height: 38px; border: none; border-radius: 19px; background: #fff;
+  box-shadow: inset 0 0 0 1px #E6E9EF; padding: 0 58px 0 14px; font-size: 13.5px; outline: none; color: var(--t1);
+}
+.wx-input-wrap input:focus { box-shadow: inset 0 0 0 1.5px var(--c-primary); }
+.wx-send {
+  position: absolute; right: 5px; top: 5px; height: 28px; padding: 0 12px; border: none; border-radius: 14px;
+  background: var(--c-gradient); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; display: none;
+}
+.wx-send.show { display: block; }
+.wx-hold {
+  display: none; width: 100%; height: 38px; border: none; border-radius: 19px; background: #fff;
+  box-shadow: inset 0 0 0 1px #E6E9EF; font-size: 13.5px; font-weight: 700; color: var(--t1); cursor: pointer;
+}
+.wx-hold.on { background: var(--c-primary-soft); box-shadow: inset 0 0 0 1.5px var(--c-primary); }
+.wx-bar.voice-mode .wx-input-wrap input, .wx-bar.voice-mode .wx-send { display: none; }
+.wx-bar.voice-mode .wx-hold { display: block; }
+.wx-panel {
+  display: none; width: 100%; background: #fff; border-radius: 12px; padding: 12px 10px;
+  margin-top: 2px; box-shadow: 0 -4px 14px rgba(20, 30, 60, .05);
+}
+.wx-panel.show { display: block; }
+.wx-panel-tip { font-size: 10.5px; color: var(--t3); margin-bottom: 8px; }
+.wx-emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.wx-emoji-grid button { height: 36px; border: none; background: none; font-size: 21px; line-height: 1; cursor: pointer; border-radius: 8px; }
+.wx-emoji-grid button:active { background: #F2F4F8; }
+.wx-plus-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 6px; padding: 2px; }
+.wx-plus-item { text-align: center; cursor: pointer; }
+.wx-plus-item i {
+  display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; margin: 0 auto;
+  border-radius: 14px; background: #F3F5F8; font-style: normal; font-size: 22px;
+  transition: transform .12s ease;
+}
+.wx-plus-item:active i { background: #E7EBF1; transform: scale(.94); }
+.wx-plus-item span { display: block; font-size: 10.5px; color: var(--t3); margin-top: 5px; }
+/* 聊天内分享赛事选择列表 */
+.se-item { padding: 10px 12px; border-radius: 12px; background: #F7F9FC; margin-bottom: 8px; cursor: pointer; }
+.se-item:active { background: #EEF2F8; }
 
 /* ============ AI 悬浮助手 ============ */
 #ai-fab {
@@ -886,12 +932,6 @@ ul, ol { list-style: none; }
 .post-img {
   width: 106px; height: 82px; border-radius: 10px; object-fit: cover; cursor: pointer;
   box-shadow: var(--shadow); background: #E8ECF4;
-}
-
-/* 聊天图片按钮 */
-.chat-img-btn {
-  flex: none; width: 42px; height: 42px; border-radius: 50%; font-size: 18px;
-  background: var(--c-primary-soft); color: var(--c-primary); display: flex; align-items: center; justify-content: center;
 }
 
 /* 语音消息气泡 */
