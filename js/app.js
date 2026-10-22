@@ -2757,19 +2757,22 @@ function aiSend() {
 (function initFab() {
   const fab = document.getElementById("ai-fab");
   let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  let suppressClick = false;        // pointerup 已处理打开时，忽略随后的 click，防止双触发
+  const TAP_TOLERANCE = 12;         // 手指轻移 12px 内仍视为点击（手机防误判为拖动）
+
   fab.addEventListener("pointerdown", e => {
     dragging = true; moved = false;
     sx = e.clientX; sy = e.clientY;
     const r = fab.getBoundingClientRect();
     const pr = document.getElementById("app").getBoundingClientRect();
     ox = r.left - pr.left; oy = r.top - pr.top;
-    fab.setPointerCapture(e.pointerId);
+    try { fab.setPointerCapture(e.pointerId); } catch (err) { /* 部分内核不支持 capture，忽略 */ }
     fab.classList.add("dragging");
   });
   fab.addEventListener("pointermove", e => {
     if (!dragging) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
-    if (Math.abs(dx) + Math.abs(dy) > 6) moved = true;
+    if (Math.abs(dx) + Math.abs(dy) > TAP_TOLERANCE) moved = true;
     if (moved) {
       const pr = document.getElementById("app").getBoundingClientRect();
       const x = Math.max(4, Math.min(pr.width - 62, ox + dx));
@@ -2780,11 +2783,89 @@ function aiSend() {
       fab.style.bottom = "auto";
     }
   });
-  fab.addEventListener("pointerup", () => {
+  function endPointer() {
+    if (!dragging) return;
     dragging = false;
     fab.classList.remove("dragging");
+    // pointerup 后统一吞掉随后的 click：点击场景防止双触发，拖动场景防止松手误开面板
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 350);
     if (!moved) { if (aiOpen) closeAI(); else openAI(); }
+  }
+  fab.addEventListener("pointerup", endPointer);
+  fab.addEventListener("pointercancel", endPointer);  // 微信/安卓手势接管时兜底
+  // click 兜底：个别内核 pointerup 不派发，click 仍会触发
+  fab.addEventListener("click", () => {
+    if (suppressClick) return;
+    if (aiOpen) closeAI(); else openAI();
   });
+})();
+
+/* ============ 桌面端横向滑动增强（鼠标拖拽 + 滚轮横滚） ============ */
+(function initDesktopHScroll() {
+  // 从事件目标向上找“可横向滚动且当前确有横向溢出”的祖先容器
+  function findHScrollable(el) {
+    let node = el;
+    while (node && node !== document.body) {
+      const st = getComputedStyle(node);
+      if ((st.overflowX === "auto" || st.overflowX === "scroll") && node.scrollWidth > node.clientWidth + 1) {
+        const vScroll = (st.overflowY === "auto" || st.overflowY === "scroll") && node.scrollHeight > node.clientHeight + 1;
+        if (!vScroll) return node;   // 纵向也能滚的容器不劫持
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  let hd = { active: false, box: null, sx: 0, sy: 0, left: 0, moved: false };
+
+  document.addEventListener("pointerdown", e => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;   // 仅鼠标左键，触屏不受影响
+    const box = findHScrollable(e.target);
+    if (!box) return;
+    hd = { active: true, box: box, sx: e.clientX, sy: e.clientY, left: box.scrollLeft, moved: false };
+  });
+
+  document.addEventListener("pointermove", e => {
+    if (!hd.active) return;
+    const dx = e.clientX - hd.sx, dy = e.clientY - hd.sy;
+    if (!hd.moved && Math.abs(dx) > 5 && Math.abs(dx) > Math.abs(dy)) {
+      hd.moved = true;
+      hd.box.classList.add("dragging-h");
+    }
+    if (hd.moved) {
+      e.preventDefault();            // 拖动时防止选中文本
+      hd.box.scrollLeft = hd.left - dx;
+    }
+  });
+
+  function endHD() {
+    if (!hd.active) return;
+    hd.active = false;
+    if (hd.box) hd.box.classList.remove("dragging-h");
+    if (hd.moved) {
+      // 拖拽结束后吞掉紧随的 click，避免误触发卡片/按钮
+      const kill = ev => { ev.stopPropagation(); ev.preventDefault(); };
+      document.addEventListener("click", kill, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener("click", kill, true), 120);
+    }
+  }
+  document.addEventListener("pointerup", endHD);
+  document.addEventListener("pointercancel", endHD);
+
+  // 悬停横向栏时，滚轮上下滚转为左右滚；到达两端后放行给页面正常滚动
+  document.addEventListener("wheel", e => {
+    if (e.ctrlKey) return;                                 // Ctrl+滚轮缩放不劫持
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;   // 触控板原生横滚不处理
+    const box = findHScrollable(e.target);
+    if (!box) return;
+    const max = box.scrollWidth - box.clientWidth;
+    if (max <= 0) return;
+    const next = Math.max(0, Math.min(max, box.scrollLeft + e.deltaY));
+    if (next === box.scrollLeft) return;                   // 已到边界，放行给页面纵向滚动
+    box.scrollLeft = next;
+    e.preventDefault();
+  }, { passive: false });
 })();
 
 /* ================= 启动 ================= */
