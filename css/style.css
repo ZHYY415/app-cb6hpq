@@ -1027,3 +1027,24 @@ ul, ol { list-style: none; }
 }
 .major-scroll, .host-chips, .filter-scroll, .topic-scroll { padding-bottom: 12px; }
 
+/* ============ 桌面端横向滑动增强 ============ */
+.dragging-h, .dragging-h * { user-select: none !important; }
+.dragging-h { cursor: grabbing !important; }
+@media (hover: hover) and (pointer: fine) {
+  .major-scroll, .topic-scroll, .ai-chips, .host-chips, .scene-scroll, .filter-scroll, .year-col {
+    scrollbar-width: thin;
+  }
+  .major-scroll::-webkit-scrollbar, .topic-scroll::-webkit-scrollbar, .ai-chips::-webkit-scrollbar,
+  .host-chips::-webkit-scrollbar, .scene-scroll::-webkit-scrollbar, .filter-scroll::-webkit-scrollbar, .year-col::-webkit-scrollbar {
+    display: block; height: 5px;
+  }
+  .major-scroll::-webkit-scrollbar-thumb, .topic-scroll::-webkit-scrollbar-thumb, .ai-chips::-webkit-scrollbar-thumb,
+  .host-chips::-webkit-scrollbar-thumb, .scene-scroll::-webkit-scrollbar-thumb, .filter-scroll::-webkit-scrollbar-thumb, .year-col::-webkit-scrollbar-thumb {
+    background: #C9D6EE; border-radius: 3px;
+  }
+  .major-scroll::-webkit-scrollbar-track, .topic-scroll::-webkit-scrollbar-track, .ai-chips::-webkit-scrollbar-track,
+  .host-chips::-webkit-scrollbar-track, .scene-scroll::-webkit-scrollbar-track, .filter-scroll::-webkit-scrollbar-track, .year-col::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
