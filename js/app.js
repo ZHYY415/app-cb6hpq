@@ -2753,51 +2753,83 @@ function aiSend() {
   aiReply(AI.ask(v, currentCtx));
 }
 
-/* ---------- AI 悬浮球拖动 ---------- */
+/* ---------- AI 悬浮球：轻点即开 + 可拖动（pointer/touch/click 三通道手势状态机） ---------- */
 (function initFab() {
   const fab = document.getElementById("ai-fab");
-  let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
-  let suppressClick = false;        // pointerup 已处理打开时，忽略随后的 click，防止双触发
-  const TAP_TOLERANCE = 12;         // 手指轻移 12px 内仍视为点击（手机防误判为拖动）
+  const app = document.getElementById("app");
+  const TAP_TOLERANCE = 12;   // 位移 12px 内视为点击，超过视为拖动
+  let dragging = false, moved = false;
+  let sx = 0, sy = 0, ox = 0, oy = 0;
+  let gestureActive = false;  // 当前手势是否由 pointer 链接管（防止 touch 兜底重复触发）
+  let fired = false;          // 本手势是否已终结（状态机替代时间窗：杜绝延迟 click 把刚打开的面板关掉）
 
-  fab.addEventListener("pointerdown", e => {
-    dragging = true; moved = false;
-    sx = e.clientX; sy = e.clientY;
-    const r = fab.getBoundingClientRect();
-    const pr = document.getElementById("app").getBoundingClientRect();
+  function toggle() { if (aiOpen) closeAI(); else openAI(); }
+
+  function startDrag(x, y) {
+    dragging = true; moved = false; fired = false; gestureActive = true;
+    sx = x; sy = y;
+    const r = fab.getBoundingClientRect(), pr = app.getBoundingClientRect();
     ox = r.left - pr.left; oy = r.top - pr.top;
-    try { fab.setPointerCapture(e.pointerId); } catch (err) { /* 部分内核不支持 capture，忽略 */ }
     fab.classList.add("dragging");
-  });
-  fab.addEventListener("pointermove", e => {
+  }
+  function moveTo(x, y) {
     if (!dragging) return;
-    const dx = e.clientX - sx, dy = e.clientY - sy;
+    const dx = x - sx, dy = y - sy;
     if (Math.abs(dx) + Math.abs(dy) > TAP_TOLERANCE) moved = true;
     if (moved) {
-      const pr = document.getElementById("app").getBoundingClientRect();
-      const x = Math.max(4, Math.min(pr.width - 62, ox + dx));
-      const y = Math.max(4, Math.min(pr.height - 62, oy + dy));
-      fab.style.left = x + "px";
-      fab.style.top = y + "px";
+      const pr = app.getBoundingClientRect();
+      const x2 = Math.max(4, Math.min(pr.width - 62, ox + dx));
+      const y2 = Math.max(4, Math.min(pr.height - 62, oy + dy));
+      fab.style.left = x2 + "px";
+      fab.style.top = y2 + "px";
       fab.style.right = "auto";
       fab.style.bottom = "auto";
     }
-  });
-  function endPointer() {
-    if (!dragging) return;
-    dragging = false;
-    fab.classList.remove("dragging");
-    // pointerup 后统一吞掉随后的 click：点击场景防止双触发，拖动场景防止松手误开面板
-    suppressClick = true;
-    setTimeout(() => { suppressClick = false; }, 350);
-    if (!moved) { if (aiOpen) closeAI(); else openAI(); }
   }
-  fab.addEventListener("pointerup", endPointer);
-  fab.addEventListener("pointercancel", endPointer);  // 微信/安卓手势接管时兜底
-  // click 兜底：个别内核 pointerup 不派发，click 仍会触发
+  function endGesture(treatAsTap) {
+    if (!dragging) return;
+    dragging = false; gestureActive = false;
+    fab.classList.remove("dragging");
+    fired = true;                       // 本手势已终结：随后的 click（无论多迟）一律吞掉
+    if (treatAsTap && !moved) toggle(); // 轻点：松手立即开合面板，无需任何等待
+  }
+
+  /* 通道 1：Pointer 事件（现代浏览器主力） */
+  fab.addEventListener("pointerdown", e => {
+    startDrag(e.clientX, e.clientY);
+    try { fab.setPointerCapture(e.pointerId); } catch (err) { /* 部分内核不支持 capture，忽略 */ }
+  });
+  fab.addEventListener("pointermove", e => moveTo(e.clientX, e.clientY));
+  fab.addEventListener("pointerup", () => endGesture(true));      // 松手即视为点击
+  fab.addEventListener("pointercancel", () => endGesture(true));  // 内核手势接管时兜底，同样立即开合
+
+  /* 通道 2：Touch 事件（老内核 / 微信内核 pointerup 迟迟不派发时的兜底）
+     若 pointer 链已结束手势（gestureActive=false）则跳过，防止双触发 */
+  fab.addEventListener("touchstart", e => {
+    if (gestureActive) return;               // pointer 链活着，交由 pointer 事件处理
+    const t = e.touches[0];
+    if (t) startDrag(t.clientX, t.clientY);  // pointer 事件不可用的老内核从这里进入
+  }, { passive: true });
+  fab.addEventListener("touchmove", e => {
+    if (!dragging || !e.touches[0]) return;
+    moveTo(e.touches[0].clientX, e.touches[0].clientY);
+    if (moved && e.cancelable) e.preventDefault();  // 拖动时阻止页面滚动
+  }, { passive: false });
+  fab.addEventListener("touchend", () => {
+    if (!gestureActive) return;              // pointer 链已处理本手势
+    endGesture(true);                        // 关键兜底：轻点时 pointerup 迟到/不来，touchend 立即开合
+  });
+  fab.addEventListener("touchcancel", () => {
+    if (!gestureActive) return;
+    endGesture(true);                        // 系统接管手势时兜底，与 pointercancel 行为一致
+  });
+
+  /* 通道 3：click（最后兜底）——只在本手势从未被前面通道处理过时才触发。
+     不再用 350ms 时间窗：时间窗正是"延迟 click 把刚打开的面板又关掉"的元凶 */
   fab.addEventListener("click", () => {
-    if (suppressClick) return;
-    if (aiOpen) closeAI(); else openAI();
+    if (fired) { fired = false; return; }    // 前面通道已处理（或为拖动手势），吞掉
+    gestureActive = false;
+    toggle();                                // 极端内核三个通道都缺席时，click 仍能打开
   });
 })();
 
