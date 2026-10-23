@@ -694,11 +694,11 @@ function renderDetailBody() {
         (ev.tags || []).map(t => '<span class="badge b-cat" style="font-size:12px;padding:5px 12px">' + esc(t) + "</span>").join(" ") + "</div></div>";
   } else if (detailTab === "past") {
     body.innerHTML = (ev.past && ev.past.length
-      ? '<table class="past-table"><tr><th>年份</th><th>参赛规模</th><th>获奖情况</th><th>备注</th><th>参考</th></tr>' +
+      ? '<table class="past-table"><tr><th>年份</th><th>参赛规模</th><th>获奖情况</th><th>备注</th><th>准备</th><th>评分标准</th></tr>' +
         ev.past.map(p => "<tr><td>" + p.year + "</td><td>" + esc(p.scale) + "</td><td>" + esc(p.award) + "</td><td>" + esc(p.note) + "</td>" +
-          '<td style="white-space:nowrap"><button class="notice-view-btn" onclick="openMaterials(\'' + ev.id + '\')">材料</button> ' +
-          '<button class="notice-view-btn" style="color:var(--c-primary);font-weight:700" onclick="openScoreCharts(\'' + ev.id + "'," + p.year + ')">评分</button></td></tr>').join("") + "</table>" +
-        '<div style="font-size:11px;color:var(--t3);margin-top:8px">提示：往届数据供参考，以主办方当年公示为准；「材料」查看报名材料与虚拟样表，「评分」查看该届评分标准图（左右切换各届）。</div>'
+          '<td><button class="notice-view-btn" onclick="openMaterials(\'' + ev.id + '\')">材料</button></td>' +
+          '<td><button class="notice-view-btn" style="color:var(--c-primary);font-weight:700" onclick="openScoreCharts(\'' + ev.id + "'," + p.year + ')">评分标准</button></td></tr>').join("") + "</table>" +
+        '<div style="font-size:11px;color:var(--t3);margin-top:8px">提示：往届数据供参考，以主办方当年公示为准；「材料」查看报名材料与虚拟样表，「评分标准」查看该届评分标准图（左右切换各届）。</div>'
       : emptyBox("该赛事暂无往届数据收录"));
   } else {
     body.innerHTML = (ev.works && ev.works.length
