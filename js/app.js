@@ -6,6 +6,31 @@
         AI 助手 / 好友私信群聊 / 消息提醒
    ============================================================ */
 
+/* ================= 版本与自动更新 =================
+   手机浏览器/微信对 HTML 缓存很顽固，改版后用户可能还在跑旧 JS。
+   页面加载后静默拉一次线上 index.html（绕缓存）对比版本号，
+   若服务端已发新版则自动刷新一次（sessionStorage 防死循环）。 */
+const APP_VERSION = "2.9.3";
+(function autoUpdateCheck() {
+  try {
+    if (sessionStorage.getItem("szt_autoupd_" + APP_VERSION)) return; // 本次会话已检查/已刷新过
+    fetch("index.html?_chk=" + Date.now(), { cache: "no-store" })
+      .then(r => r.ok ? r.text() : "")
+      .then(html => {
+        if (!html) return;
+        const m = html.match(/app\.js\?v=([\w.]+)/);
+        const latest = m ? m[1] : "";
+        if (latest && latest !== APP_VERSION) {
+          sessionStorage.setItem("szt_autoupd_" + APP_VERSION, "1");
+          location.reload();   // 拉到最新 HTML 与资源
+        } else {
+          sessionStorage.setItem("szt_autoupd_" + APP_VERSION, "1");
+        }
+      })
+      .catch(() => {});        // 本地 file:// 打开等场景 fetch 会失败，静默忽略
+  } catch (e) { /* 忽略 */ }
+})();
+
 /* ================= 全局状态 ================= */
 const STORE_KEY = "szt_state_v2";
 let state = {
@@ -2682,6 +2707,8 @@ function openAI() {
   const panel = document.getElementById("ai-panel");
   panel.hidden = false;
   renderAIChips();
+  const sub = document.querySelector(".ai-sub");
+  if (sub && !sub.dataset.verTagged) { sub.dataset.verTagged = "1"; sub.textContent += " · v" + APP_VERSION; }
   if (!document.getElementById("ai-msgs").children.length) {
     aiPush("ai",
       "你好，我是小赛 🤖\n我可以帮你查赛事、找证书考试、按专业推荐，还能**分析你正在看的页面**。\n\n试试点下方快捷指令，或直接问我问题～");
@@ -2815,10 +2842,14 @@ function aiSend() {
     moveTo(e.touches[0].clientX, e.touches[0].clientY);
     if (moved && e.cancelable) e.preventDefault();  // 拖动时阻止页面滚动
   }, { passive: false });
-  fab.addEventListener("touchend", () => {
-    if (!gestureActive) return;              // pointer 链已处理本手势
+  fab.addEventListener("touchend", e => {
+    // 本手势已由 pointer 链处理（可能刚打开面板）：必须吞掉浏览器即将合成的 click——
+    // 面板已展开并覆盖手指位置，该 click 会命中面板背景触发"点背景关闭"，面板刚开就被关
+    if (fired) { if (e.cancelable) e.preventDefault(); return; }
+    if (!gestureActive) return;
     endGesture(true);                        // 关键兜底：轻点时 pointerup 迟到/不来，touchend 立即开合
-  });
+    if (e.cancelable) e.preventDefault();    // 同理吞掉合成 click，防止穿透到面板背景
+  }, { passive: false });
   fab.addEventListener("touchcancel", () => {
     if (!gestureActive) return;
     endGesture(true);                        // 系统接管手势时兜底，与 pointercancel 行为一致
@@ -2951,7 +2982,11 @@ function initApp() {
   document.getElementById("ai-close").onclick = closeAI;
   document.getElementById("ai-send").onclick = aiSend;
   document.getElementById("ai-input").addEventListener("keydown", e => { if (e.key === "Enter") aiSend(); });
-  document.getElementById("ai-panel").addEventListener("click", e => { if (e.target.id === "ai-panel") closeAI(); });
+  // 点面板背景关闭：pointerup + click 双通道（快速连点时浏览器可能吞 click，pointerup 保证可靠；closeAI 幂等，双触发无害）
+  const aiPanel = document.getElementById("ai-panel");
+  const bgClose = e => { if (e.target.id === "ai-panel") closeAI(); };
+  aiPanel.addEventListener("pointerup", bgClose);
+  aiPanel.addEventListener("click", bgClose);
   document.addEventListener("keydown", e => { if (e.key === "Escape") { if (aiOpen) closeAI(); else { closeOverlay(); closeViewer(); } } });
   if (!state.user.role) { showLogin(); }
   else {
