@@ -621,6 +621,7 @@ ul, ol { list-style: none; }
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 8px 22px rgba(43,92,255,.42), 0 0 0 4px rgba(255,255,255,.85);
   transition: box-shadow .2s; touch-action: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 #ai-fab:active { cursor: grabbing; box-shadow: 0 4px 12px rgba(43,92,255,.5), 0 0 0 4px rgba(255,255,255,.9); }
 #ai-fab::after {
