@@ -48,12 +48,15 @@ let state = {
   guideList: [],           // 教师指导赛事 [{id, note}]
   recs: [],                // 教师推荐赛事 [{evId, teacher, school, note, time}]
   joinedGroups: [],        // 已加入的教师指导群 id
-  remindOff: []            // 已关闭提醒的预赛项目 id
+  remindOff: [],           // 已关闭提醒的预赛项目 id
+  scoreAuth: false,        // 学生成绩查看授权（指导老师可见）
+  pinnedGroups: [],        // 置顶群聊 id
+  doneDismiss: []          // 忽略自动归档的赛事 id
 };
 let currentCtx = { page: "home" };
 let detailTab = "intro";
 let catFilter = { kind: "all", major: "不限专业", year: "all" };
-let commFilter = { channel: "public", topic: "", schoolTab: "posts" };
+let commFilter = { channel: "public", topic: "", schoolTab: "posts", province: "" };
 let homeFilter = { kind: "comp", host: "all" };
 let schoolFilter = { cat: "all", major: "" };
 let schoolNoticeOpen = false;
@@ -76,6 +79,14 @@ function load() {
       if (!state.recs) state.recs = [];
       if (!state.joinedGroups) state.joinedGroups = [];
       if (!state.remindOff) state.remindOff = [];
+      if (!state.scoreAuth) state.scoreAuth = false;
+      if (!state.pinnedGroups) state.pinnedGroups = [];
+      if (!state.doneDismiss) state.doneDismiss = [];
+      if (!state.favsVer || state.favsVer < 2) {
+        /* 老数据升级：补充新演示预赛项（含已结束赛事，体验成绩自动归档） */
+        state.favs = Array.from(new Set((state.favs || []).concat(DB.initFavs)));
+        state.favsVer = 2;
+      }
     }
   } catch (e) { /* ignore */ }
 }
@@ -683,10 +694,11 @@ function renderDetailBody() {
         (ev.tags || []).map(t => '<span class="badge b-cat" style="font-size:12px;padding:5px 12px">' + esc(t) + "</span>").join(" ") + "</div></div>";
   } else if (detailTab === "past") {
     body.innerHTML = (ev.past && ev.past.length
-      ? '<table class="past-table"><tr><th>年份</th><th>参赛规模</th><th>获奖情况</th><th>备注</th><th>准备</th></tr>' +
+      ? '<table class="past-table"><tr><th>年份</th><th>参赛规模</th><th>获奖情况</th><th>备注</th><th>参考</th></tr>' +
         ev.past.map(p => "<tr><td>" + p.year + "</td><td>" + esc(p.scale) + "</td><td>" + esc(p.award) + "</td><td>" + esc(p.note) + "</td>" +
-          '<td><button class="notice-view-btn" onclick="openMaterials(\'' + ev.id + '\')">材料</button></td></tr>').join("") + "</table>" +
-        '<div style="font-size:11px;color:var(--t3);margin-top:8px">提示：往届数据供参考，以主办方当年公示为准；「准备」列可查看报名材料与虚拟样表。</div>'
+          '<td style="white-space:nowrap"><button class="notice-view-btn" onclick="openMaterials(\'' + ev.id + '\')">材料</button> ' +
+          '<button class="notice-view-btn" style="color:var(--c-primary);font-weight:700" onclick="openScoreCharts(\'' + ev.id + "'," + p.year + ')">评分</button></td></tr>').join("") + "</table>" +
+        '<div style="font-size:11px;color:var(--t3);margin-top:8px">提示：往届数据供参考，以主办方当年公示为准；「材料」查看报名材料与虚拟样表，「评分」查看该届评分标准图（左右切换各届）。</div>'
       : emptyBox("该赛事暂无往届数据收录"));
   } else {
     body.innerHTML = (ev.works && ev.works.length
@@ -745,6 +757,98 @@ function openApply(url) {
   copyText(url);
   try { window.open(url, "_blank"); } catch (e) { }
   toast("已打开官网并复制报名链接");
+}
+
+/* ================= 比赛评分标准图（往届数据 · 本地生成，可左右切换各届） ================= */
+const SCORE_DIST_TPL = {
+  "创新创业类": [["项目创新性", 30], ["商业价值与落地", 25], ["团队协作与执行", 20], ["展示答辩", 15], ["文档规范", 10]],
+  "学科竞赛类": [["解题与算法能力", 40], ["代码实现质量", 25], ["测试通过率", 20], ["工程与注释规范", 15]],
+  "数理": [["模型假设与建模", 35], ["求解与算法", 30], ["论文写作规范", 25], ["创新性", 10]],
+  "机电": [["方案创新性", 30], ["实物完成度", 30], ["现场演示", 25], ["设计文档", 15]],
+  "exam": [["客观题得分", 60], ["主观题得分", 40]],
+  "default": [["创新性", 30], ["技术实现", 35], ["现场展示", 20], ["文档规范", 15]]
+};
+function scoreDistFor(ev, p) {
+  if (p && p.scores && p.scores.length) return p.scores;
+  if (ev.kind === "exam") return SCORE_DIST_TPL.exam;
+  return SCORE_DIST_TPL[ev.category] || SCORE_DIST_TPL.default;
+}
+function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function wrapCN(ctx, text, x, y, maxW, lh) {
+  let line = "", yy = y;
+  for (const ch of String(text)) {
+    if (ctx.measureText(line + ch).width > maxW) { ctx.fillText(line, x, yy); line = ch; yy += lh; }
+    else line += ch;
+  }
+  if (line) ctx.fillText(line, x, yy);
+  return yy;
+}
+function drawScoreChart(ev, p) {
+  const dist = scoreDistFor(ev, p);
+  const meta = [["获奖比例", p.award], ["参赛规模", p.scale], ["备注", p.note]].filter(m => m[1]);
+  const W = 720, H = Math.max(560, 150 + dist.length * 62 + 40 + 60 + meta.length * 76 + 60);
+  const cv = document.createElement("canvas");
+  cv.width = W * 2; cv.height = H * 2;
+  const ctx = cv.getContext("2d");
+  ctx.scale(2, 2);
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, "#2B5CFF"); grad.addColorStop(1, "#5B8CFF");
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, 96);
+  ctx.fillStyle = "#fff";
+  ctx.font = "800 30px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText(ev.short + " · " + p.year + " 届", 32, 44);
+  ctx.font = "500 19px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.globalAlpha = .92;
+  ctx.fillText("评分标准与成绩构成（演示数据）", 32, 76);
+  ctx.globalAlpha = 1;
+  const bx = 32, bw = W - 210, rowH = 62, y0 = 150;
+  dist.forEach((d, i) => {
+    const y = y0 + i * rowH;
+    ctx.fillStyle = "#1F2A44";
+    ctx.font = "700 22px 'PingFang SC','Microsoft YaHei',sans-serif";
+    ctx.fillText(d[0], bx, y + 20);
+    ctx.fillStyle = "#EEF2F8";
+    rrect(ctx, bx, y + 30, bw, 16, 8); ctx.fill();
+    const w2 = bw * d[1] / 100;
+    const g2 = ctx.createLinearGradient(bx, 0, bx + Math.max(w2, 24), 0);
+    g2.addColorStop(0, "#2B5CFF"); g2.addColorStop(1, "#7C9BFF");
+    ctx.fillStyle = g2;
+    rrect(ctx, bx, y + 30, Math.max(w2, 24), 16, 8); ctx.fill();
+    ctx.fillStyle = "#2B5CFF";
+    ctx.font = "800 22px 'PingFang SC','Microsoft YaHei',sans-serif";
+    ctx.fillText(d[1] + " 分", bx + bw + 14, y + 46);
+  });
+  const iy = y0 + dist.length * rowH + 30;
+  const metaRows = meta.map(m => m[0] + "：" + m[1]);
+  ctx.font = "500 19px 'PingFang SC','Microsoft YaHei',sans-serif";
+  let lineCount = 0;
+  metaRows.forEach(t => { let l = 1, s = ""; for (const ch of t) { if (ctx.measureText(s + ch).width > W - 110) { l++; s = ch; } else s += ch; } lineCount += l; });
+  const bh = 34 + lineCount * 32 + 14;
+  ctx.fillStyle = "#F7F9FC";
+  rrect(ctx, 32, iy, W - 64, bh, 16); ctx.fill();
+  ctx.fillStyle = "#5A6B85";
+  let ty = iy + 40;
+  metaRows.forEach(t => { ty = wrapCN(ctx, t, 52, ty, W - 104, 32) + 18; });
+  ctx.fillStyle = "#9AA7BC";
+  ctx.font = "500 16px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText("赛证通 · 数据基于公开信息整理，以主办方当年公示为准", 32, H - 26);
+  return cv.toDataURL("image/png");
+}
+function openScoreCharts(evId, year) {
+  const ev = DB.events.find(e => e.id === evId);
+  if (!ev || !ev.past || !ev.past.length) { toast("该赛事暂无往届评分数据"); return; }
+  const list = ev.past.map(p => drawScoreChart(ev, p));
+  const idx = Math.max(0, ev.past.findIndex(p => p.year === year));
+  openViewer(list, idx, ev.short + " · 评分标准图（左右切换查看各届）");
 }
 
 /* 作品大图 */
@@ -1025,36 +1129,67 @@ function openDone(tab) {
 function renderDone() {
   const box = document.getElementById("done-list");
   if (!box) return;
-  const list = state.done.filter(d => d.kind === doneTab);
-  box.innerHTML = list.length
-    ? list.map((d, i) => {
-      const ev = DB.events.find(e => e.id === d.evId);
-      let style = "db-gray", label = "已完成";
-      if (/特等奖|一等奖|优秀|金牌|9[0-9]|100/.test(d.result || "")) { style = "db-gold"; label = "优秀"; }
-      else if (/二等奖|三等奖|通过|合格|[6-8][0-9]/.test(d.result || "")) { style = "db-blue"; label = "通过"; }
-      return '<div class="done-item">' +
-        '<div class="done-badge ' + style + '"><span class="big">' + (d.kind === "comp" ? "🏆" : "✓") + "</span>" + label + "</div>" +
-        '<div class="my-ev-main"><div class="my-ev-name">' + esc(d.name) + "</div>" +
-        '<div class="my-ev-time">' + esc(d.date) + " · " + (d.kind === "comp" ? "比赛" : "考试") + (ev ? " · " + ev.level : "") + "</div>" +
-        (d.result ? '<div class="my-ev-time" style="color:var(--c-primary);font-weight:700">成绩：' + esc(d.result) + "</div>" : "") +
-        "</div>" +
-        '<button class="del-btn" onclick="delDone(\'' + d.evId + "','" + esc(d.date) + '\')">✕</button></div>';
-    }).join("")
+  const evOf = d => DB.events.find(e => e.id === d.evId);
+  const manual = state.done.filter(d => d.kind === doneTab);
+  const auto = autoDoneList().filter(d => d.kind === doneTab);
+  box.innerHTML = (manual.length + auto.length)
+    ? manual.map(d => doneItemHTML(d, evOf(d), true)).join("") +
+      auto.map(d => doneItemHTML(d, evOf(d), false)).join("")
     : emptyBox(doneTab === "comp" ? "还没有比赛记录，完成比赛后记得回来归档成绩" : "还没有考试记录，考完试后记得回来归档成绩", "openDoneForm()", "立即录入");
 }
-function openDoneForm() {
+/* 自动归档：我的预赛中已结束（比赛/考试日期已过）且尚未归档的项目，自动出现在「已完成」待归档 */
+function autoDoneList() {
+  const t = today();
+  return (state.favs || []).map(fid => DB.events.find(e => e.id === fid)).filter(Boolean)
+    .filter(ev => parseDate(ev.eventDate) < t)
+    .filter(ev => !state.done.some(d => d.evId === ev.id))
+    .filter(ev => !(state.doneDismiss || []).includes(ev.id))
+    .map(ev => ({ auto: true, evId: ev.id, name: ev.name, kind: ev.kind, date: ev.eventDate }));
+}
+function doneItemHTML(d, ev, showDel) {
+  let style = "db-gray", label = d.auto ? "待归档" : "已完成";
+  if (!d.auto) {
+    if (/特等奖|一等奖|优秀|金牌|9[0-9]|100/.test(d.result || "")) { style = "db-gold"; label = "优秀"; }
+    else if (/二等奖|三等奖|通过|合格|[6-8][0-9]/.test(d.result || "")) { style = "db-blue"; label = "通过"; }
+  }
+  return '<div class="done-item' + (d.auto ? " done-auto" : "") + '"' + (d.auto ? ' onclick="openDoneFormAuto(\'' + d.evId + '\')" style="cursor:pointer"' : "") + ">" +
+    '<div class="done-badge ' + (d.auto ? "db-orange" : style) + '"><span class="big">' + (d.kind === "comp" ? "🏆" : "✓") + "</span>" + label + "</div>" +
+    '<div class="my-ev-main"><div class="my-ev-name">' + esc(d.name) + "</div>" +
+    '<div class="my-ev-time">' + esc(d.date) + " · " + (d.kind === "comp" ? "比赛" : "考试") + (ev ? " · " + ev.level : "") + "</div>" +
+    (d.auto ? '<div class="my-ev-time">系统已自动归档 · 点击录入成绩与名次</div>' : "") +
+    (!d.auto && d.result ? '<div class="my-ev-time" style="color:var(--c-primary);font-weight:700">成绩：' + esc(d.result) + (d.rank ? ' · 名次：' + esc(d.rank) : "") + "</div>" : "") +
+    "</div>" +
+    (showDel
+      ? '<button class="del-btn" onclick="event.stopPropagation();delDone(\'' + d.evId + "','" + esc(d.date) + '\')">✕</button>'
+      : '<button class="del-btn" title="不归档" onclick="event.stopPropagation();ignoreAutoDone(\'' + d.evId + '\')">✕</button>') +
+    "</div>";
+}
+function ignoreAutoDone(evId) {
+  state.doneDismiss.push(evId); save();
+  toast("已忽略该项目的自动归档");
+  renderDone();
+}
+function openDoneForm(preEv) {
+  const isAuto = !!preEv;
   document.getElementById("overlay-root").innerHTML = overlayHtml("录入成绩",
+    (isAuto ? '<div class="alert-banner" style="margin:0 0 12px"><div class="ab-icon">⚡</div><div><div class="ab-title">系统已自动归档该项目</div><div class="ab-desc">已按比赛日期自动带入，补充成绩与名次后即正式归档</div></div></div>' : "") +
     '<div class="form-card">' +
     '<div class="form-row"><label class="form-label">选择项目</label>' +
     '<select class="form-select" id="df-ev" onchange="dfKindSync()"><option value="">— 自定义名称 —</option>' +
-    DB.events.map(e => '<option value="' + e.id + '">' + esc(e.short) + "</option>").join("") + "</select></div>" +
+    DB.events.map(e => '<option value="' + e.id + '"' + (isAuto && preEv.id === e.id ? " selected" : "") + ">" + esc(e.short) + "</option>").join("") + "</select></div>" +
     '<div class="form-row"><label class="form-label">或手动输入名称</label><input class="form-input" id="df-name" placeholder="例如：校级英语词汇竞赛"></div>' +
     '<div class="form-row"><label class="form-label">类型</label><select class="form-select" id="df-kind"><option value="comp" ' + (doneTab === "comp" ? "selected" : "") + '>比赛</option><option value="exam" ' + (doneTab === "exam" ? "selected" : "") + ">考试</option></select></div>" +
-    '<div class="form-row"><label class="form-label">完成日期</label><input class="form-input" id="df-date" type="date"></div>' +
+    '<div class="form-row"><label class="form-label">完成日期</label><input class="form-input" id="df-date" type="date" value="' + (isAuto ? preEv.eventDate : "") + '"></div>' +
     '<div class="form-row"><label class="form-label">成绩 / 奖项</label><input class="form-input" id="df-result" placeholder="例如：省赛二等奖 / 92分（优秀）"></div>' +
+    '<div class="form-row"><label class="form-label">名次 / 排名</label><input class="form-input" id="df-rank" placeholder="例如：全省第 8 名 / 校内第 3（选填）"></div>' +
     '<div class="form-row"><label class="form-label">备注</label><textarea class="form-textarea" id="df-note" placeholder="心得、后续计划…（选填）"></textarea></div>' +
     '<button class="btn-main" style="width:100%" onclick="saveDone()">保存归档</button>' +
     "</div>");
+  if (isAuto) { try { dfKindSync(); } catch (e) { } }
+}
+function openDoneFormAuto(evId) {
+  const ev = DB.events.find(e => e.id === evId);
+  if (ev) openDoneForm(ev);
 }
 function dfKindSync() {
   const id = document.getElementById("df-ev").value;
@@ -1070,6 +1205,7 @@ function saveDone() {
     kind: document.getElementById("df-kind").value,
     date: document.getElementById("df-date").value || today().toLocaleDateString("zh-CN"),
     result: document.getElementById("df-result").value.trim(),
+    rank: document.getElementById("df-rank").value.trim(),
     note: document.getElementById("df-note").value.trim()
   });
   save(); toast("已归档到「已完成」");
@@ -1478,6 +1614,7 @@ function renderCommunity() {
   const inSchool = commFilter.channel === "school";
   const tab = commFilter.schoolTab || "posts";
   let list = allPosts().filter(p => commFilter.channel === "public" ? p.channel === "public" : (p.channel === "school" && (!p.school || !u.school || p.school === u.school)));
+  if (commFilter.channel === "public" && commFilter.province) list = list.filter(p => postProvince(p) === commFilter.province);
   if (commFilter.topic) list = list.filter(p => (p.tags || []).some(t => t.includes(commFilter.topic)));
   if (isTeacher && inSchool && tab === "posts") {
     /* 教师查看本校组队帖：突出组队需求并支持专业筛选 */
@@ -1508,10 +1645,15 @@ function renderCommunity() {
           '<button class="filter-chip ' + (commFilter.teacherMajor === m ? "on" : "") + '" onclick="setTeacherMajor(\'' + m + '\')">' + m + "</button>").join("") +
         '</div></div><div style="font-size:11px;color:var(--t3);padding-top:8px">教师视角：可查看本校学生全部组队帖、在帖下留言指导，或发布官方组队召集帖（校队选拔 / 项目组队）。</div></div>'
       : "") +
+    (!inSchool
+      ? '<div class="topic-scroll" style="margin-bottom:6px">' +
+        ["全部"].concat([...new Set(allPosts().filter(p => p.channel === "public").map(postProvince))].sort()).map(pv =>
+          '<button class="topic-chip ' + ((pv === "全部" && !commFilter.province) || commFilter.province === pv ? "on" : "") + '" onclick="setProvince(\'' + (pv === "全部" ? "" : pv) + '\')">📍 ' + (pv === "全部" ? "全部省份" : pv) + "</button>").join("") + "</div>"
+      : "") +
     '<div class="topic-scroll">' + topics.map(t =>
       '<button class="topic-chip ' + ((t === "全部" && !commFilter.topic) || commFilter.topic === t ? "on" : "") + '" onclick="setTopic(\'' + (t === "全部" ? "" : t) + '\')"># ' + t + "</button>").join("") + "</div>" +
     '<div id="post-list">' +
-    (list.length ? list.map(p => postCard(p)).join("") : emptyBox(u.school ? "该频道还没有帖子，发第一帖找队友吧" : "校内频道需要先绑定学校，公共频道更热闹哦", "openPostCreate()", "发布组队帖")) +
+    (list.length ? list.map(p => postCard(p)).join("") : emptyBox(commFilter.channel === "public" && commFilter.province ? "该省份暂时还没有帖子，换个省份或发第一帖吧" : (u.school ? "该频道还没有帖子，发第一帖找队友吧" : "校内频道需要先绑定学校，公共频道更热闹哦"), "openPostCreate()", "发布组队帖")) +
     "</div>");
   const old = document.getElementById("fab-post-btn");
   if (old) old.remove();
@@ -1527,6 +1669,16 @@ function renderCommunity() {
 function pageEl(p) { return document.getElementById("page-" + p); }
 function setChannel(c) { commFilter.channel = c; if (c !== "school") commFilter.schoolTab = "posts"; renderCommunity(); }
 function setSchoolTab(t) { commFilter.schoolTab = t; renderCommunity(); }
+
+/* ---------- 公共频道省份筛选 ---------- */
+function schoolToProvince(school) {
+  if (!school) return "";
+  if (DB.schoolProvince[school]) return DB.schoolProvince[school];
+  const s = DB.schools.find(x => x.name === school || x.short === school);
+  return s ? (DB.schoolProvince[s.short] || "黑龙江") : "其他";
+}
+function postProvince(p) { return p.province || schoolToProvince(p.author.school) || "黑龙江"; }
+function setProvince(pv) { commFilter.province = pv; renderCommunity(); }
 
 /* ---------- 本校频道 · 指导群聊（教师为比赛/考试组建，学生可加入） ---------- */
 function schoolGuideGroups() {
@@ -1777,6 +1929,7 @@ function submitPost() {
   state.myPosts.unshift({
     id: "up" + Date.now(), channel, need,
     school: state.user.school,
+    province: channel === "public" ? (schoolToProvince(state.user.school) || "黑龙江") : "",
     photos: (window._pickPhotos || []).slice(),
     author: { name: state.user.nick + (state.user.role === "teacher" ? " 老师" : ""), school: (DB.schools.find(s => s.name === state.user.school) || {}).short || state.user.school || "未绑定", avatar: state.user.role === "teacher" ? "#7C5CFF" : "#2B5CFF", uid: "", teacher: state.user.role === "teacher" },
     time: "刚刚", content, tags: (window._pickTags || []).slice(0, 6),
@@ -1871,6 +2024,7 @@ function renderMe() {
         mi("openMyNotices()", "qi-cyan", "📢", "发布公告", state.myNotices.length + " 条 · 含示例") +
         mi("openAllSignups()", "qi-orange", "📋", "报名名单汇总", "系统自动汇总") +
         mi("openGuideList()", "qi-purple", "🎯", "我指导的赛事", "时间节点自动提醒") +
+        mi("openStudentScores()", "qi-blue", "📊", "学生成绩单", "仅显示已授权学生") +
         "</div>" +
         '<div class="menu-label">👤 个人中心</div>' +
         '<div class="menu-group">' +
@@ -1880,7 +2034,8 @@ function renderMe() {
       : '<div class="menu-label">🎒 我的竞赛</div>' +
         '<div class="menu-group">' +
         mi("openMyEvents()", "qi-orange", I.starF, "我的预赛", "点击条目直达详情") +
-        mi("openDone()", "qi-blue", I.medal, "已完成的比赛 / 考试", "比赛 / 考试分类归档") +
+        mi("openDone()", "qi-blue", I.medal, "已完成的比赛 / 考试", "成绩名次自动归档") +
+        mi("openScoreAuth()", "qi-green", "🛡", "成绩查看授权", state.scoreAuth ? "已开放给指导老师" : "未开放（隐私保护）") +
         "</div>") +
     '<div class="menu-label">💬 社交互动</div>' +
     '<div class="menu-group">' +
@@ -1896,6 +2051,82 @@ function renderMe() {
     mi("switchRole()", "qi-red", "🔄", "切换身份", isTeacher ? "当前：教师" : "当前：学生") +
     "</div>";
 }
+/* ================= 学生成绩查看授权 + 教师端学生成绩单 ================= */
+function openScoreAuth() {
+  currentCtx = { page: "scoreAuth" };
+  const on = !!state.scoreAuth;
+  document.getElementById("overlay-root").innerHTML = overlayHtml("成绩查看授权",
+    '<div class="form-card" style="text-align:center;padding:26px 18px">' +
+      '<div style="font-size:46px">' + (on ? "🔓" : "🔒") + "</div>" +
+      '<div style="font-size:17px;font-weight:800;margin:8px 0 4px">' + (on ? "已开放成绩查看" : "未开放成绩查看") + "</div>" +
+      '<div style="font-size:12px;color:var(--t3);line-height:1.9">你的指导老师（本校教师及所加入指导群的群主老师）' + (on ? "<b>可以</b>查看" : "<b>无法</b>查看") + "你的比赛 / 考试成绩与名次</div>" +
+      '<button class="' + (on ? "btn-ghost" : "btn-main") + '" style="width:100%;margin-top:18px" onclick="toggleScoreAuth()">' + (on ? "🔒 关闭授权" : "🔓 开放给我的指导老师") + "</button>" +
+    "</div>" +
+    '<div class="form-card" style="margin-top:12px">' +
+      '<div class="card-title" style="font-size:13.5px">授权说明</div>' +
+      '<div style="font-size:12px;color:var(--t2);line-height:2;text-align:left">' +
+      "· 开启后，老师可在「我的 → 教学管理 → 学生成绩单」中查看你的归档成绩、名次与备注<br>" +
+      "· 仅限成绩数据，不涉及私信、社区帖子等其他内容<br>" +
+      "· 可随时关闭，关闭后老师立即无法再查看<br>" +
+      "· 默认关闭，是否开放完全由你自主决定</div>" +
+    "</div>");
+}
+function toggleScoreAuth() {
+  state.scoreAuth = !state.scoreAuth;
+  save();
+  toast(state.scoreAuth ? "已开放成绩查看，指导老师可在教学管理中查看" : "已关闭授权，成绩单对老师隐藏");
+  openScoreAuth();
+}
+function teacherStudents() {
+  const t = state.user;
+  const list = [];
+  if (state.done && state.done.length) {
+    list.push({ me: true, name: state.user.nick + "（当前账号）", school: state.user.school || "—", major: state.user.major, avatar: "#2B5CFF", auth: !!state.scoreAuth, scores: state.done });
+  }
+  DB.users.filter(u => !u.teacher && schoolMatch(u.school, t.school)).forEach(u => {
+    list.push({ id: u.id, name: u.name, school: u.school, major: u.major, avatar: u.avatar, auth: !!(DB.demoScoreAuth || {})[u.id], scores: (DB.demoScores || {})[u.id] || [] });
+  });
+  return list;
+}
+function schoolMatch(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const sa = DB.schools.find(x => x.name === a || x.short === a);
+  const sb = DB.schools.find(x => x.name === b || x.short === b);
+  return !!(sa && sb && (sa.id === sb.id || sa.name === sb.name || sa.short === sb.short));
+}
+function openStudentScores() {
+  currentCtx = { page: "studentScores" };
+  const list = teacherStudents();
+  document.getElementById("overlay-root").innerHTML = overlayHtml("学生成绩单",
+    '<div style="font-size:11.5px;color:var(--t3);margin:0 2px 10px;line-height:1.7">仅显示<b>已授权</b>学生的成绩；学生关闭授权后立即不可见。是否授权由学生自主决定，默认关闭。</div>' +
+    (list.length ? list.map(s => {
+      const n = s.me ? s.scores.length : (DB.demoScores[s.id] || []).length;
+      return '<div class="friend-item" onclick="' + (s.auth ? "openScoreCardView('" + (s.me ? "__me__" : s.id) + "')" : "toast('该学生未开放成绩查看')") + '">' +
+        '<div class="avatar" style="background:' + s.avatar + '">' + esc(s.name[0]) + "</div>" +
+        '<div style="flex:1"><div class="friend-name">' + esc(s.name) + (s.auth ? ' <span class="auth-tag ok">已授权</span>' : ' <span class="auth-tag off">未授权</span>') + '</div>' +
+        '<div class="friend-sub">' + esc(s.school) + " · " + esc(s.major || "") + (s.auth ? " · " + n + " 条归档" : "") + "</div></div>" +
+        '<span class="post-time">' + (s.auth ? "查看 →" : "🔒") + "</span></div>";
+    }).join("") : emptyBox("本校暂无学生成绩数据（演示）")));
+}
+function openScoreCardView(key) {
+  const s = teacherStudents().find(x => (x.me ? "__me__" : x.id) === key);
+  if (!s || !s.auth) { toast("该学生未开放成绩查看"); return; }
+  const scores = s.me ? s.scores : (DB.demoScores[s.id] || []);
+  const comp = scores.filter(d => d.kind === "comp"), exam = scores.filter(d => d.kind === "exam");
+  const block = (arr, title) => '<div class="card-title" style="font-size:13.5px;margin:16px 0 8px">' + title + "（" + arr.length + "）</div>" +
+    (arr.length ? arr.map(d => doneItemHTML(d, DB.events.find(e => e.id === d.evId), false)).join("") : '<div style="font-size:12px;color:var(--t3)">暂无归档记录</div>');
+  document.getElementById("overlay-root").innerHTML = overlayHtml("成绩单 · " + s.name,
+    '<div class="form-card" style="text-align:center">' +
+      '<div class="avatar" style="width:56px;height:56px;font-size:20px;background:' + s.avatar + ';margin:0 auto 10px">' + esc(s.name[0]) + "</div>" +
+      '<div style="font-size:16.5px;font-weight:800">' + esc(s.name) + "</div>" +
+      '<div style="font-size:12px;color:var(--t3);margin:4px 0 10px">' + esc(s.school) + " · " + esc(s.major || "") + "</div>" +
+      '<span class="auth-tag ok">学生已授权查看</span>' +
+    "</div>" +
+    '<div class="form-card" style="margin-top:12px">' + block(comp, "🏆 比赛") + block(exam, "📄 考试") + "</div>" +
+    '<div style="font-size:11px;color:var(--t3);margin-top:10px;text-align:center">该成绩单由学生自主授权开放，仅用于教学指导参考</div>');
+}
+
 function openAllSignups() {
   const rows = state.myNotices.filter(n => n.signup);
   currentCtx = { page: "allSignups" };
@@ -2604,13 +2835,26 @@ function sendChatImg(shoot) {
 /* 群聊 */
 function openGroupList() {
   currentCtx = { page: "groups" };
-  const all = DB.groups.concat(state.myGroups);
+  const all = allGroups().slice().sort((a, b) => (state.pinnedGroups.includes(b.id) ? 1 : 0) - (state.pinnedGroups.includes(a.id) ? 1 : 0));
   document.getElementById("overlay-root").innerHTML = overlayHtml("我的群聊",
-    '<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-ghost" style="padding:8px 16px;font-size:12.5px" onclick="openGroupCreate()">＋ 创建群聊</button></div>' +
-    all.map(g =>
-      '<div class="friend-item" onclick="openGroup(\'' + g.id + '\')"><div class="avatar" style="background:' + g.avatar + '">' + esc(g.name[0]) + "</div>" +
-      '<div style="flex:1"><div class="friend-name">' + esc(g.name) + '</div><div class="friend-sub">' + g.members + " 人 · " + esc((g.msgs[g.msgs.length - 1] || {}).text || "新群聊") + "</div></div>" +
-      '<span class="post-time">群聊</span></div>').join(""));
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+      '<div style="font-size:11.5px;color:var(--t3)">点击 📌 可将班级群 / 组队群置顶</div>' +
+      '<button class="btn-ghost" style="padding:8px 16px;font-size:12.5px" onclick="openGroupCreate()">＋ 创建群聊</button></div>' +
+    all.map(g => {
+      const pinned = state.pinnedGroups.includes(g.id);
+      const kindTag = g.kind === "class" ? '<span class="need-tag" style="margin-left:6px;background:#E8F7EF;color:#1D9E5F">班级群</span>' : (g.kind === "guide" ? '<span class="need-tag" style="margin-left:6px">指导群</span>' : "");
+      return '<div class="friend-item' + (pinned ? " pinned" : "") + '" onclick="openGroup(\'' + g.id + '\')"><div class="avatar" style="background:' + g.avatar + '">' + esc(g.name[0]) + "</div>" +
+        '<div style="flex:1"><div class="friend-name">' + (pinned ? '<span style="margin-right:4px">📌</span>' : "") + esc(g.name) + kindTag + '</div><div class="friend-sub">' + g.members + " 人 · " + esc((g.msgs[g.msgs.length - 1] || {}).text || "新群聊") + "</div></div>" +
+        '<button class="pin-btn' + (pinned ? " on" : "") + '" title="置顶/取消置顶" onclick="event.stopPropagation();togglePinGroup(\'' + g.id + '\')">📌</button></div>';
+    }).join(""));
+}
+function togglePinGroup(gid) {
+  const i = state.pinnedGroups.indexOf(gid);
+  if (i >= 0) state.pinnedGroups.splice(i, 1);
+  else state.pinnedGroups.unshift(gid);
+  save();
+  openGroupList();
+  toast(i >= 0 ? "已取消置顶" : "已置顶，该群聊将排在最前");
 }
 function allGroups() {
   /* 普通组队群默认可见；教师指导群需加入后才出现在「我的群聊」 */
