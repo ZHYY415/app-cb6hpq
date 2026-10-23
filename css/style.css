@@ -613,6 +613,16 @@ ul, ol { list-style: none; }
 .se-item { padding: 10px 12px; border-radius: 12px; background: #F7F9FC; margin-bottom: 8px; cursor: pointer; }
 .se-item:active { background: #EEF2F8; }
 
+/* ============ v3.0 成绩授权 / 群置顶 / 自动归档 ============ */
+.auth-tag { display: inline-block; font-size: 10.5px; font-weight: 700; border-radius: 9px; padding: 2px 9px; margin-left: 6px; vertical-align: 1px; }
+.auth-tag.ok { background: #E8F7EF; color: #1D9E5F; }
+.auth-tag.off { background: #EEF1F6; color: #8A96A8; }
+.pin-btn { border: none; background: #EEF1F6; color: #8A96A8; width: 34px; height: 34px; border-radius: 10px; font-size: 15px; cursor: pointer; flex: none; line-height: 1; }
+.pin-btn.on { background: #FFF4D6; color: #B88A00; }
+.friend-item.pinned { background: #F3F7FF; }
+.done-badge.db-orange { background: #FFF1E3; color: #C77700; }
+.done-item.done-auto { border: 1px dashed #F0B26A; }
+
 /* ============ AI 悬浮助手 ============ */
 #ai-fab {
   position: absolute; right: 14px; bottom: 148px; z-index: 60;
