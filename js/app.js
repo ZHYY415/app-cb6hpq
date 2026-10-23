@@ -10,7 +10,7 @@
    手机浏览器/微信对 HTML 缓存很顽固，改版后用户可能还在跑旧 JS。
    页面加载后静默拉一次线上 index.html（绕缓存）对比版本号，
    若服务端已发新版则自动刷新一次（sessionStorage 防死循环）。 */
-const APP_VERSION = "3.0.1";
+const APP_VERSION = "3.0.2";
 (function autoUpdateCheck() {
   try {
     if (sessionStorage.getItem("szt_autoupd_" + APP_VERSION)) return; // 本次会话已检查/已刷新过
@@ -496,7 +496,9 @@ function refreshTabBadge() {
 function renderHome() {
   const page = document.getElementById("page-home");
   const favNear = state.favs.map(id => DB.events.find(e => e.id === id)).filter(Boolean)
-    .map(ev => ({ ev, st: evStatus(ev) })).sort((a, b) => a.st.days - b.st.days)[0];
+    .map(ev => ({ ev, st: evStatus(ev) }))
+    .filter(x => ["sign", "soon"].includes(x.st.code))   // 已结束/备赛中的项目不占用首页报名提醒位
+    .sort((a, b) => a.st.days - b.st.days)[0];
   const opening = DB.events.filter(ev => evStatus(ev).code === "sign").length;
   const compN = DB.events.filter(e => e.kind === "comp").length;
   const examN = DB.events.filter(e => e.kind === "exam").length;
